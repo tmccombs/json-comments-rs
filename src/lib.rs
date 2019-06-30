@@ -1,5 +1,5 @@
-use std::io::{self, Read, Result, ErrorKind};
 use std::fmt;
+use std::io::{self, ErrorKind, Read, Result};
 
 #[derive(Eq, PartialEq, Copy, Clone, Debug)]
 enum State {
@@ -13,47 +13,6 @@ enum State {
 }
 
 use State::*;
-
-/// A [`Read`](https://doc.rust-lang.org/std/io/trait.Read.html)
-/// that strips out comments from JSON-like text. See [`strip_comments`](fn.strip_comments.html).
-pub struct StripComments<T: Read> {
-    inner: T,
-    state: State,
-}
-
-/// Transform a `input` so that it changes all comments to spaces so that a downstream json parser
-/// (such as json-serde) doesn't choke on them.
-///
-/// The supported comments are:
-///   - C style block comments (`/* ... */`)
-///   - C style line comments (`// ...`)
-///   - Shell style line comments (`# ...`)
-///
-/// ## Example
-/// ```
-/// use json_comments::strip_comments;
-/// use std::io::Read;
-///
-/// let input = r#"{
-/// // c line comment
-/// "a": "comment in string /* a */",
-/// ## shell line comment
-/// } /** end */"#;
-///
-/// let mut stripped = String::new();
-/// strip_comments(input.as_bytes()).read_to_string(&mut stripped).unwrap();
-///
-/// assert_eq!(stripped, "{
-///                  \n\"a\": \"comment in string /* a */\",
-///                     \n}           ");
-///
-/// ```
-pub fn strip_comments<T: Read>(input: T) -> StripComments<T> {
-    StripComments {
-        inner: input,
-        state: State::Top,
-    }
-}
 
 /// Errors specific to removing comments.
 ///
@@ -76,10 +35,57 @@ impl fmt::Display for Error {
     }
 }
 
-impl std::error::Error for Error {
+impl std::error::Error for Error {}
+
+/// A [`Read`] that transforms another [`Read`] so that it changes all comments to spaces so that a downstream json parser
+/// (such as json-serde) doesn't choke on them.
+///
+/// The supported comments are:
+///   - C style block comments (`/* ... */`)
+///   - C style line comments (`// ...`)
+///   - Shell style line comments (`# ...`)
+///
+/// ## Example
+/// ```
+/// use json_comments::StripComments;
+/// use std::io::Read;
+///
+/// let input = r#"{
+/// // c line comment
+/// "a": "comment in string /* a */",
+/// ## shell line comment
+/// } /** end */"#;
+///
+/// let mut stripped = String::new();
+/// StripComments::new(input.as_bytes()).read_to_string(&mut stripped).unwrap();
+///
+/// assert_eq!(stripped, "{
+///                  \n\"a\": \"comment in string /* a */\",
+///                     \n}           ");
+///
+/// ```
+///
+pub struct StripComments<T: Read> {
+    inner: T,
+    state: State,
 }
 
-impl<T> Read for StripComments<T> where T: Read{
+impl<T> StripComments<T>
+where
+    T: Read,
+{
+    pub fn new(input: T) -> Self {
+        Self {
+            inner: input,
+            state: Top,
+        }
+    }
+}
+
+impl<T> Read for StripComments<T>
+where
+    T: Read,
+{
     fn read(&mut self, buf: &mut [u8]) -> Result<usize> {
         let count = self.inner.read(buf)?;
         if count > 0 {
@@ -98,7 +104,9 @@ impl<T> Read for StripComments<T> where T: Read{
         } else {
             match self.state {
                 InString | StringEscape => return Err(data_error(Error::IncompleteString)),
-                InComment | InBlockComment | MaybeCommentEnd => return Err(data_error(Error::IncompleteComment)),
+                InComment | InBlockComment | MaybeCommentEnd => {
+                    return Err(data_error(Error::IncompleteComment))
+                }
                 _ => {}
             }
         }
@@ -112,7 +120,7 @@ fn top(c: &mut u8) -> State {
         b'/' => {
             *c = b' ';
             InComment
-        },
+        }
         b'#' => {
             *c = b' ';
             InLineComment
@@ -125,7 +133,7 @@ fn in_string(c: u8) -> State {
     match c {
         b'"' => Top,
         b'\\' => StringEscape,
-        _ => InString
+        _ => InString,
     }
 }
 
@@ -134,7 +142,7 @@ fn in_comment(c: &mut u8) -> Result<State> {
         b'*' => InBlockComment,
         b'/' => InLineComment,
         _ => return Err(data_error(Error::UnexpectedForwardSlash)),
-   };
+    };
     *c = b' ';
     Ok(new_state)
 }
@@ -167,23 +175,23 @@ fn in_line_comment(c: &mut u8) -> State {
     }
 }
 
-
-
 fn data_error(err: Error) -> io::Error {
     io::Error::new(ErrorKind::InvalidData, err)
 }
 
 #[cfg(test)]
 mod tests {
-     use super::strip_comments;
-     use std::io::{Read, ErrorKind};
+    use super::StripComments;
+    use std::io::{ErrorKind, Read};
 
-     fn strip_string(input: &str) -> String {
-         let mut out = String::new();
-         let count = strip_comments(input.as_bytes()).read_to_string(&mut out).unwrap();
-         assert_eq!(count, input.len());
-         out
-     }
+    fn strip_string(input: &str) -> String {
+        let mut out = String::new();
+        let count = StripComments::new(input.as_bytes())
+            .read_to_string(&mut out)
+            .unwrap();
+        assert_eq!(count, input.len());
+        out
+    }
 
     #[test]
     fn block_comments() {
@@ -212,7 +220,9 @@ mod tests {
         let json = r#""foo"#;
         let mut stripped = String::new();
 
-        let err = strip_comments(json.as_bytes()).read_to_string(&mut stripped).unwrap_err();
+        let err = StripComments::new(json.as_bytes())
+            .read_to_string(&mut stripped)
+            .unwrap_err();
         assert_eq!(err.kind(), ErrorKind::InvalidData);
     }
 
@@ -221,7 +231,9 @@ mod tests {
         let json = r#"/* foo "#;
         let mut stripped = String::new();
 
-        let err = strip_comments(json.as_bytes()).read_to_string(&mut stripped).unwrap_err();
+        let err = StripComments::new(json.as_bytes())
+            .read_to_string(&mut stripped)
+            .unwrap_err();
         assert_eq!(err.kind(), ErrorKind::InvalidData);
     }
 
@@ -230,7 +242,9 @@ mod tests {
         let json = r#"/* foo *"#;
         let mut stripped = String::new();
 
-        let err = strip_comments(json.as_bytes()).read_to_string(&mut stripped).unwrap_err();
+        let err = StripComments::new(json.as_bytes())
+            .read_to_string(&mut stripped)
+            .unwrap_err();
         assert_eq!(err.kind(), ErrorKind::InvalidData);
     }
 }
