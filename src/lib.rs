@@ -114,8 +114,7 @@ where
     fn read(&mut self, buf: &mut [u8]) -> Result<usize> {
         let count = self.inner.read(buf)?;
         if count > 0 {
-            let mut iter = buf[..count].iter_mut();
-            while let Some(c) = iter.next() {
+            for c in buf[..count].iter_mut() {
                 self.state = match self.state {
                     Top => top(c),
                     InString => in_string(*c),
@@ -126,10 +125,8 @@ where
                     InLineComment => in_line_comment(c),
                 }
             }
-        } else {
-            if self.state != Top && self.state != InLineComment {
-                invalid_data!();
-            }
+        } else if self.state != Top && self.state != InLineComment {
+            invalid_data!();
         }
         Ok(count)
     }
