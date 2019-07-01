@@ -41,8 +41,7 @@
 //! # }
 //! ```
 //!
-use std::fmt;
-use std::io::{self, ErrorKind, Read, Result};
+use std::io::{ErrorKind, Read, Result};
 
 #[derive(Eq, PartialEq, Copy, Clone, Debug)]
 enum State {
@@ -56,29 +55,6 @@ enum State {
 }
 
 use State::*;
-
-/// Errors specific to removing comments.
-///
-/// Note that due to the signature of [`Read::read`], this will actually be wrapped inside a
-/// [`std::io::Error`].
-#[derive(Debug, Eq, PartialEq)]
-pub enum Error {
-    /// Error if the stream ends with a string that was never terminated.
-    IncompleteString,
-    /// Error if the stream ends with a block comment that was never terminated.
-    IncompleteComment,
-    /// Error if there is a forward slash at the top level that isn't immediately followed by a "*"
-    /// or "/" to start a comment.
-    UnexpectedForwardSlash,
-}
-
-impl fmt::Display for Error {
-    fn fmt(&self, fmt: &mut fmt::Formatter) -> fmt::Result {
-        write!(fmt, "Invalid state for json with comments ({:?})", self)
-    }
-}
-
-impl std::error::Error for Error {}
 
 /// A [`Read`] that transforms another [`Read`] so that it changes all comments to spaces so that a downstream json parser
 /// (such as json-serde) doesn't choke on them.
@@ -125,6 +101,12 @@ where
     }
 }
 
+macro_rules! invalid_data {
+    () => {
+        return Err(ErrorKind::InvalidData.into());
+    };
+}
+
 impl<T> Read for StripComments<T>
 where
     T: Read,
@@ -145,12 +127,8 @@ where
                 }
             }
         } else {
-            match self.state {
-                InString | StringEscape => return Err(data_error(Error::IncompleteString)),
-                InComment | InBlockComment | MaybeCommentEnd => {
-                    return Err(data_error(Error::IncompleteComment))
-                }
-                _ => {}
+            if self.state != Top && self.state != InLineComment {
+                invalid_data!();
             }
         }
         Ok(count)
@@ -184,7 +162,7 @@ fn in_comment(c: &mut u8) -> Result<State> {
     let new_state = match c {
         b'*' => InBlockComment,
         b'/' => InLineComment,
-        _ => return Err(data_error(Error::UnexpectedForwardSlash)),
+        _ => invalid_data!(),
     };
     *c = b' ';
     Ok(new_state)
@@ -216,10 +194,6 @@ fn in_line_comment(c: &mut u8) -> State {
         *c = b' ';
         InLineComment
     }
-}
-
-fn data_error(err: Error) -> io::Error {
-    io::Error::new(ErrorKind::InvalidData, err)
 }
 
 #[cfg(test)]
