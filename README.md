@@ -23,7 +23,7 @@ use serde_json::{Result, Value};
 use json_comments::StripComments;
 
 fn main() -> Result<()> {
-// Some JSON input data as a &str. Maybe this comes form the user.
+// Some JSON input data as a &str. Maybe this comes from the user.
 let data = r#"
     {
         "name": /* full */ "John Doe",
