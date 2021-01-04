@@ -87,6 +87,7 @@ use State::*;
 pub struct StripComments<T: Read> {
     inner: T,
     state: State,
+    settings: CommentSettings,
 }
 
 impl<T> StripComments<T>
@@ -97,6 +98,19 @@ where
         Self {
             inner: input,
             state: Top,
+            settings: CommentSettings::default(),
+        }
+    }
+
+    /// Create a new `StripComments` with settings which may be different from the default.
+    ///
+    /// This is useful if you wish to disable allowing certain kinds of comments.
+    #[inline]
+    pub fn with_settings(settings: CommentSettings, input: T) -> Self {
+        Self {
+            inner: input,
+            state: Top,
+            settings,
         }
     }
 }
@@ -116,10 +130,10 @@ where
         if count > 0 {
             for c in buf[..count].iter_mut() {
                 self.state = match self.state {
-                    Top => top(c),
+                    Top => top(c, &self.settings),
                     InString => in_string(*c),
                     StringEscape => InString,
-                    InComment => in_comment(c)?,
+                    InComment => in_comment(c, &self.settings)?,
                     InBlockComment => in_block_comment(c),
                     MaybeCommentEnd => maybe_comment_end(c),
                     InLineComment => in_line_comment(c),
@@ -132,14 +146,110 @@ where
     }
 }
 
-fn top(c: &mut u8) -> State {
+/// Settings for `StripComments`
+///
+/// The default is for all comment types to be enabled.
+#[derive(Copy, Clone, Debug)]
+pub struct CommentSettings {
+    /// True if c-style block comments (`/* ... */`) are allowed
+    block_comments: bool,
+    /// True if c-style `//` line comments are allowed
+    slash_line_comments: bool,
+    /// True if shell-style `#` line comments are allowed
+    hash_line_comments: bool,
+}
+
+impl Default for CommentSettings {
+    fn default() -> Self {
+        Self::all()
+    }
+}
+
+impl CommentSettings {
+    /// Enable all comment Styles
+    pub const fn all() -> Self {
+        Self {
+            block_comments: true,
+            slash_line_comments: true,
+            hash_line_comments: true,
+        }
+    }
+    /// Only allow line comments starting with `#`
+    pub const fn hash_only() -> Self {
+        Self {
+            hash_line_comments: true,
+            block_comments: false,
+            slash_line_comments: false,
+        }
+    }
+    /// Only allow "c-style" comments.
+    ///
+    /// Specifically, line comments beginning with `//` and
+    /// block comment like `/* ... */`.
+    pub const fn c_style() -> Self {
+        Self {
+            block_comments: true,
+            slash_line_comments: true,
+            hash_line_comments: false,
+        }
+    }
+
+    /// Create a new `StripComments` for `input`, using these settings.
+    ///
+    /// Transform `input` into a [`Read`] that strips out comments.
+    /// The types of comments to support are determined by the configuration of
+    /// `self`.
+    ///
+    /// ## Examples
+    ///
+    /// ```
+    /// use json_comments::CommentSettings;
+    /// use std::io::Read;
+    ///
+    /// let input = r#"{
+    /// // c line comment
+    /// "a": "b"
+    /// /** multi line
+    /// comment
+    /// */ }"#;
+    ///
+    /// let mut stripped = String::new();
+    /// CommentSettings::c_style().strip_comments(input.as_bytes()).read_to_string(&mut stripped).unwrap();
+    ///
+    /// assert_eq!(stripped, "{
+    ///                  \n\"a\": \"b\"
+    ///                           }");
+    /// ```
+    ///
+    /// ```
+    /// use json_comments::CommentSettings;
+    /// use std::io::Read;
+    ///
+    /// let input = r#"{
+    /// ## shell line comment
+    /// "a": "b"
+    /// }"#;
+    ///
+    /// let mut stripped = String::new();
+    /// CommentSettings::hash_only().strip_comments(input.as_bytes()).read_to_string(&mut stripped).unwrap();
+    ///
+    /// assert_eq!(stripped, "{
+    ///                     \n\"a\": \"b\"\n}");
+    /// ```
+    #[inline]
+    pub fn strip_comments<I: Read>(self, input: I) -> StripComments<I> {
+        StripComments::with_settings(self, input)
+    }
+}
+
+fn top(c: &mut u8, settings: &CommentSettings) -> State {
     match *c {
         b'"' => InString,
         b'/' => {
             *c = b' ';
             InComment
         }
-        b'#' => {
+        b'#' if settings.hash_line_comments => {
             *c = b' ';
             InLineComment
         }
@@ -155,10 +265,10 @@ fn in_string(c: u8) -> State {
     }
 }
 
-fn in_comment(c: &mut u8) -> Result<State> {
+fn in_comment(c: &mut u8, settings: &CommentSettings) -> Result<State> {
     let new_state = match c {
-        b'*' => InBlockComment,
-        b'/' => InLineComment,
+        b'*' if settings.block_comments => InBlockComment,
+        b'/' if settings.slash_line_comments => InLineComment,
         _ => invalid_data!(),
     };
     *c = b' ';
@@ -195,7 +305,7 @@ fn in_line_comment(c: &mut u8) -> State {
 
 #[cfg(test)]
 mod tests {
-    use super::StripComments;
+    use super::*;
     use std::io::{ErrorKind, Read};
 
     fn strip_string(input: &str) -> String {
@@ -257,6 +367,41 @@ mod tests {
         let mut stripped = String::new();
 
         let err = StripComments::new(json.as_bytes())
+            .read_to_string(&mut stripped)
+            .unwrap_err();
+        assert_eq!(err.kind(), ErrorKind::InvalidData);
+    }
+
+    #[test]
+    fn no_hash_comments() {
+        let json = r#"# bad comment
+        {"a": "b"}"#;
+        let mut stripped = String::new();
+        CommentSettings::c_style()
+            .strip_comments(json.as_bytes())
+            .read_to_string(&mut stripped)
+            .unwrap();
+        assert_eq!(stripped, json);
+    }
+
+    #[test]
+    fn no_slash_line_comments() {
+        let json = r#"// bad comment
+        {"a": "b"}"#;
+        let mut stripped = String::new();
+        let err = CommentSettings::hash_only()
+            .strip_comments(json.as_bytes())
+            .read_to_string(&mut stripped)
+            .unwrap_err();
+        assert_eq!(err.kind(), ErrorKind::InvalidData);
+    }
+
+    #[test]
+    fn no_block_comments() {
+        let json = r#"/* bad comment */ {"a": "b"}"#;
+        let mut stripped = String::new();
+        let err = CommentSettings::hash_only()
+            .strip_comments(json.as_bytes())
             .read_to_string(&mut stripped)
             .unwrap_err();
         assert_eq!(err.kind(), ErrorKind::InvalidData);
