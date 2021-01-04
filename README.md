@@ -2,7 +2,7 @@
 
 [![Build Status](https://travis-ci.com/tmccombs/json-comments-rs.svg?branch=master)](https://travis-ci.com/tmccombs/json-comments-rs)
 
-`json_comments` is a library to strip out comments from JSON-like test. By processing text
+`json_comments` is a library to strip out comments from JSON-like text. By processing text
 through a [`StripComments`] adapter first, it is possible to use a standard JSON parser (such
 as [serde\_json](https://crates.io/crates/serde_json) with quasi-json input that contains
 comments.
