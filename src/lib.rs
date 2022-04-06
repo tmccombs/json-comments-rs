@@ -330,7 +330,10 @@ mod tests {
     fn block_comments_with_possible_end() {
         let json = r#"{/* Comment*PossibleEnd */"hi": /** abc */ "bye"}"#;
         let stripped = strip_string(json);
-        assert_eq!(stripped, r#"{                         "hi":            "bye"}"#);
+        assert_eq!(
+            stripped,
+            r#"{                         "hi":            "bye"}"#
+        );
     }
 
     #[test]
