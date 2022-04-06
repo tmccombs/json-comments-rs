@@ -117,7 +117,7 @@ where
 
 macro_rules! invalid_data {
     () => {
-        return Err(ErrorKind::InvalidData.into());
+        return Err(ErrorKind::InvalidData.into())
     };
 }
 
