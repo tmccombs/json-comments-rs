@@ -286,7 +286,9 @@ fn in_block_comment(c: &mut u8) -> State {
 }
 
 fn maybe_comment_end(c: &mut u8) -> State {
-    if *c == b'/' {
+    let old = *c;
+    *c = b' ';
+    if old == b'/' {
         *c = b' ';
         Top
     } else {
@@ -322,6 +324,13 @@ mod tests {
         let json = r#"{/* Comment */"hi": /** abc */ "bye"}"#;
         let stripped = strip_string(json);
         assert_eq!(stripped, r#"{             "hi":            "bye"}"#);
+    }
+
+    #[test]
+    fn block_comments_with_possible_end() {
+        let json = r#"{/* Comment*PossibleEnd */"hi": /** abc */ "bye"}"#;
+        let stripped = strip_string(json);
+        assert_eq!(stripped, r#"{                         "hi":            "bye"}"#);
     }
 
     #[test]
