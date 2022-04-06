@@ -1,6 +1,7 @@
 # json-comments-rs
 
-[![Build Status](https://travis-ci.com/tmccombs/json-comments-rs.svg?branch=master)](https://travis-ci.com/tmccombs/json-comments-rs)
+[![Build Status](https://github.com/tmccombs/json-comments-rs/actions/workflows/build/badge.svg?branch=main)](https://github.com/tmccombs/json-comments-rs/actions)
+[![Docs](https://docs.rs/json_comments/badge.svg)](https://docs.rs/json_comments/)
 
 `json_comments` is a library to strip out comments from JSON-like text. By processing text
 through a [`StripComments`] adapter first, it is possible to use a standard JSON parser (such
