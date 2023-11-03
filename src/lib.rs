@@ -288,11 +288,10 @@ fn in_block_comment(c: &mut u8) -> State {
 fn maybe_comment_end(c: &mut u8) -> State {
     let old = *c;
     *c = b' ';
-    if old == b'/' {
-        *c = b' ';
-        Top
-    } else {
-        InBlockComment
+    match old {
+        b'/' => Top,
+        b'*' => MaybeCommentEnd,
+        _ => InBlockComment,
     }
 }
 
@@ -334,6 +333,15 @@ mod tests {
             stripped,
             r#"{                         "hi":            "bye"}"#
         );
+    }
+
+    // See https://github.com/tmccombs/json-comments-rs/issues/12
+    // Make sure we can parse a block comment that ends with more than one "*"
+    #[test]
+    fn doc_comment() {
+        let json = r##"/** C **/ { "foo": 123 }"##;
+        let stripped = strip_string(json);
+        assert_eq!(stripped, r##"          { "foo": 123 }"##);
     }
 
     #[test]
